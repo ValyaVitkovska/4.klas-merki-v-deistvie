@@ -459,6 +459,9 @@ const levels={easy:'1',medium:'2',hard:'3'};
 let selectedCategory='time',selectedLevel='easy',selectedDuration=5,taskNumber=1,score=0,streak=0,currentTask=null,selectedOp=null;
 let correctCount=0,attemptedTasks=0,taskAttempted=false,taskSolved=false,timerId=null,endAt=0,halfReportShown=false,minuteReportShown=false,sessionFinished=false,referenceOpen=false,referenceOpenedAt=0;
 const totalTasks=10;
+// За всяка нова игра пазим вече показаните задачи и редуваме умножение/деление.
+let usedTaskKeys=new Set();
+let nextTaskOp='mul';
 
 function setActive(group,attr,val){
   $$(`#${group} .choice`).forEach(x=>x.classList.toggle('active',x.dataset[attr]===val));
@@ -476,23 +479,44 @@ function ranges(kind){
   return R[kind][selectedLevel];
 }
 function small1000(){return selectedLevel==='easy'?pick([0,100,200,250,300,400,500,600,750,800,900]):rand(0,999)}
-function makeTime(){
-  const [a,b]=ranges('time'),h=rand(a,b),m=rand(0,11)*5,total=h*60+m,toSmall=Math.random()<.5;
+function makeTime(forcedOp=null){
+  const [a,b]=ranges('time'),h=rand(a,b),m=rand(0,11)*5,total=h*60+m,toSmall=forcedOp?forcedOp==='mul':Math.random()<.5;
   if(toSmall)return {display:`${h} ч ${m} мин = ? мин`,flow:[`${h} ч ${m} мин`,`? мин`],inputs:[['a1','мин']],correct:[total],op:'mul',calc:{type:'muladd',a:h,factor:60,add:m},hint:`Отиваме към по-малка единица. 1 час = 60 минути. Първо умножаваме часовете по 60.`,solution:`${h} × 60 = ${h*60}<br>${h*60} + ${m} = <strong>${total} мин</strong>`};
   return {display:`${total} мин = ? ч ? мин`,flow:[`${total} мин`,`? ч ? мин`],inputs:[['a1','ч'],['a2','мин']],correct:[h,m],op:'div',calc:{type:'divrem',total:total,factor:60},hint:`Отиваме към по-голяма единица. Търсим колко цели групи по 60 минути има.`,solution:`${total} : 60 = ${h} и остатък ${m}<br><strong>${total} мин = ${h} ч ${m} мин</strong>`};
 }
-function makeLength(){
+function makeLength(forcedOp=null){
   const p=pick([{big:'km',small:'m',factor:1000,kind:'factor1000'},{big:'m',small:'dm',factor:10,kind:'step10'},{big:'dm',small:'cm',factor:10,kind:'step10'},{big:'cm',small:'mm',factor:10,kind:'step10'}]);
-  const [a,b]=ranges(p.kind),big=rand(a,b),small=p.factor===1000?small1000():rand(0,9),total=big*p.factor+small,toSmall=Math.random()<.5;
+  const [a,b]=ranges(p.kind),big=rand(a,b),small=p.factor===1000?small1000():rand(0,9),total=big*p.factor+small,toSmall=forcedOp?forcedOp==='mul':Math.random()<.5;
   if(toSmall)return {display:`${big} ${p.big} ${small} ${p.small} = ? ${p.small}`,flow:[`${big} ${p.big} ${small} ${p.small}`,`? ${p.small}`],inputs:[['a1',p.small]],correct:[total],op:'mul',calc:{type:'muladd',a:big,factor:p.factor,add:small},hint:`Отиваме към по-малка единица. 1 ${p.big} = ${p.factor} ${p.small}.`,solution:`${big} × ${p.factor} = ${big*p.factor}<br>${big*p.factor} + ${small} = <strong>${total} ${p.small}</strong>`};
   return {display:`${total} ${p.small} = ? ${p.big} ? ${p.small}`,flow:[`${total} ${p.small}`,`? ${p.big} ? ${p.small}`],inputs:[['a1',p.big],['a2',p.small]],correct:[big,small],op:'div',calc:{type:'divrem',total:total,factor:p.factor},hint:`Отиваме към по-голяма единица. Търсим колко цели групи по ${p.factor} ${p.small} има.`,solution:`${total} : ${p.factor} = ${big} и остатък ${small}<br><strong>${total} ${p.small} = ${big} ${p.big} ${small} ${p.small}</strong>`};
 }
-function makeMassVol(){
-  const p=pick([{big:'t',small:'kg'},{big:'l',small:'ml'}]),[a,b]=ranges('factor1000'),big=rand(a,b),small=p.small==='ml'?pick([0,50,100,200,250,300,400,500,600,750,800,900]):small1000(),total=big*1000+small,toSmall=Math.random()<.5;
+function makeMassVol(forcedOp=null){
+  const p=pick([{big:'t',small:'kg'},{big:'l',small:'ml'}]),[a,b]=ranges('factor1000'),big=rand(a,b),small=p.small==='ml'?pick([0,50,100,200,250,300,400,500,600,750,800,900]):small1000(),total=big*1000+small,toSmall=forcedOp?forcedOp==='mul':Math.random()<.5;
   if(toSmall)return {display:`${big} ${p.big} ${small} ${p.small} = ? ${p.small}`,flow:[`${big} ${p.big} ${small} ${p.small}`,`? ${p.small}`],inputs:[['a1',p.small]],correct:[total],op:'mul',calc:{type:'muladd',a:big,factor:1000,add:small},hint:`Отиваме към по-малка единица. 1 ${p.big} = 1000 ${p.small}.`,solution:`${big} × 1000 = ${big*1000}<br>${big*1000} + ${small} = <strong>${total} ${p.small}</strong>`};
   return {display:`${total} ${p.small} = ? ${p.big} ? ${p.small}`,flow:[`${total} ${p.small}`,`? ${p.big} ? ${p.small}`],inputs:[['a1',p.big],['a2',p.small]],correct:[big,small],op:'div',calc:{type:'divrem',total:total,factor:1000},hint:`Отиваме към по-голяма единица. Търсим колко цели хиляди има.`,solution:`${total} : 1000 = ${big} и остатък ${small}<br><strong>${total} ${p.small} = ${big} ${p.big} ${small} ${p.small}</strong>`};
 }
-function makeTask(){if(selectedCategory==='time')return makeTime();if(selectedCategory==='length')return makeLength();if(selectedCategory==='massvol')return makeMassVol();return pick([makeTime,makeLength,makeMassVol])()}
+function makeTask(){
+  // Строго редуване на посоките: разликата между задачите с умножение и деление е най-много 1.
+  const wantedOp=nextTaskOp;
+  let task=null;
+  for(let tries=0;tries<120;tries++){
+    if(selectedCategory==='time')task=makeTime(wantedOp);
+    else if(selectedCategory==='length')task=makeLength(wantedOp);
+    else if(selectedCategory==='massvol')task=makeMassVol(wantedOp);
+    else task=pick([makeTime,makeLength,makeMassVol])(wantedOp);
+
+    // Ключът включва условието и посоката. Така една и съща задача не се повтаря в рамките на играта.
+    const key=`${task.op}|${task.display}`;
+    if(!usedTaskKeys.has(key)){
+      usedTaskKeys.add(key);
+      nextTaskOp=wantedOp==='mul'?'div':'mul';
+      return task;
+    }
+  }
+  // Практически недостижим резервен вариант при изчерпване на възможните комбинации.
+  nextTaskOp=wantedOp==='mul'?'div':'mul';
+  return task;
+}
 
 function geoReact(type,text){
   const box=$('#geoReaction'),bubble=$('#geoReactionBubble');
@@ -601,7 +625,7 @@ function answers(){return currentTask.inputs.map(([id])=>{const v=$('#'+id).valu
 function equal(a,b){return a.length===b.length&&a.every((v,i)=>v===b[i])}
 function calcFactorValue(){const e=$('#calcFactor');if(!e||e.value==='')return null;return Number(e.value)}
 
-$('#startBtn').onclick=()=>{taskNumber=1;score=0;streak=0;correctCount=0;attemptedTasks=0;sessionFinished=false;$('#startScreen').classList.add('hidden');$('#endScreen').classList.add('hidden');$('#gameScreen').classList.remove('hidden');$('#geoReactionImg').src=$('.geoImg').src;renderTask();startTimer()};
+$('#startBtn').onclick=()=>{taskNumber=1;score=0;streak=0;correctCount=0;attemptedTasks=0;sessionFinished=false;usedTaskKeys=new Set();nextTaskOp=Math.random()<.5?'mul':'div';$('#startScreen').classList.add('hidden');$('#endScreen').classList.add('hidden');$('#gameScreen').classList.remove('hidden');$('#geoReactionImg').src=$('.geoImg').src;renderTask();startTimer()};
 $('#checkBtn').onclick=()=>{
   clearFeedback();
   if(taskSolved){geoReact('cheer','✅ Тази задача вече е решена. Натисни <strong>„Следваща“</strong>.');return}
